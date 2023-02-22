@@ -94,6 +94,7 @@ static int font_index = -1;
 static uint32_t attrs = 0;
 static bool dock = false;
 static bool topbar = true;
+static bool fixed_geom = false;
 static int bw = -1, bh = -1, bx = 0, by = 0;
 static int bu = 1; // Underline height
 static rgba_t fgc, bgc, ugc;
@@ -842,14 +843,17 @@ monitor_new (int x, int y, int width, int height, char *name)
     ret = xcalloc(1, sizeof(monitor_t));
     ret->name = name;
     ret->x = x;
-    ret->y = (topbar ? by : height - bh - by) + y;
+    if (fixed_geom)
+        ret->y = y;
+    else
+        ret->y = (topbar ? by : height - bh - by) + y;
     ret->width = width;
     ret->next = ret->prev = NULL;
     ret->window = xcb_generate_id(c);
 
     int depth = (visual == scr->root_visual) ? XCB_COPY_FROM_PARENT : 32;
     xcb_create_window(c, depth, ret->window, scr->root,
-            ret->x, ret->y, width, bh, 0,
+            ret->x, ret->y, width, (fixed_geom ? height : bh), 0,
             XCB_WINDOW_CLASS_INPUT_OUTPUT, visual,
             XCB_CW_BACK_PIXEL | XCB_CW_BORDER_PIXEL | XCB_CW_OVERRIDE_REDIRECT | XCB_CW_EVENT_MASK | XCB_CW_COLORMAP,
             (const uint32_t []){ bgc.v, bgc.v, dock, XCB_EVENT_MASK_EXPOSURE | XCB_EVENT_MASK_BUTTON_PRESS, colormap });
@@ -1144,7 +1148,7 @@ bool
 parse_geometry_string (char *str, int *tmp)
 {
     char *p = str;
-    int i = 0, j;
+    int i = 0, j, k = 0;
 
     if (!str || !str[0])
         return false;
@@ -1185,7 +1189,14 @@ parse_geometry_string (char *str, int *tmp)
             return false;
         }
         tmp[i] = j;
+        k++;
     }
+
+    // All four fields have been specified by the user, thus inherit
+    // xinerama/xrandr and just create one window at the given
+    // coordinates.
+    if (k == 4)
+        fixed_geom = true;
 
     return true;
 }
@@ -1245,28 +1256,32 @@ init (char *wm_name)
     // Initialize monitor list head and tail
     monhead = montail = NULL;
 
-    // Check if RandR is present
-    qe_reply = xcb_get_extension_data(c, &xcb_randr_id);
+    if (fixed_geom) {
+         monitor_add(monitor_new(bx, by, bw, bh, NULL));
+    } else {
+        // Check if RandR is present
+        qe_reply = xcb_get_extension_data(c, &xcb_randr_id);
 
-    if (qe_reply && qe_reply->present) {
-        get_randr_monitors();
-    }
-#if WITH_XINERAMA
-    else {
-        qe_reply = xcb_get_extension_data(c, &xcb_xinerama_id);
-
-        // Check if Xinerama extension is present and active
         if (qe_reply && qe_reply->present) {
-            xcb_xinerama_is_active_reply_t *xia_reply;
-            xia_reply = xcb_xinerama_is_active_reply(c, xcb_xinerama_is_active(c), NULL);
-
-            if (xia_reply && xia_reply->state)
-                get_xinerama_monitors();
-
-            free(xia_reply);
+            get_randr_monitors();
         }
-    }
+#if WITH_XINERAMA
+        else {
+            qe_reply = xcb_get_extension_data(c, &xcb_xinerama_id);
+
+            // Check if Xinerama extension is present and active
+            if (qe_reply && qe_reply->present) {
+                xcb_xinerama_is_active_reply_t *xia_reply;
+                xia_reply = xcb_xinerama_is_active_reply(c, xcb_xinerama_is_active(c), NULL);
+
+                if (xia_reply && xia_reply->state)
+                    get_xinerama_monitors();
+
+                free(xia_reply);
+            }
+        }
 #endif
+    }
 
     if (!monhead && num_outputs != 0) {
         fprintf(stderr, "Failed to find any specified outputs\n");
