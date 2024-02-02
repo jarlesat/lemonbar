@@ -107,7 +107,7 @@ static monitor_t *monhead, *montail;
 static font_t **font_list = NULL;
 static int font_count = 0;
 static int font_index = -1;
-static int offsets_y[MAX_FONT_COUNT];
+static int *offsets_y;
 static int offset_y_count = 0;
 static int offset_y_index = 0;
 
@@ -877,6 +877,7 @@ font_load (const char *pattern)
     }
 
     font_list = xreallocarray(font_list, font_count + 1, sizeof(font_t));
+    offsets_y = xreallocarray(offsets_y, font_count + 1, sizeof(int));
     if (!font_list) {
         fprintf(stderr, "Failed to allocate %d font descriptors", font_count + 1);
         exit(EXIT_FAILURE);
@@ -885,14 +886,14 @@ font_load (const char *pattern)
 }
 
 void add_y_offset(int offset) {
-    if (offset_y_count >= MAX_FONT_COUNT) {
+    if (offset_y_count >= font_count) {
         fprintf(stderr, "Max offset count reached. Could not set offset \"%d\"\n", offset);
         return;
     }
 
     offsets_y[offset_y_count] = strtol(optarg, NULL, 10);
     if (offset_y_count == 0) {
-        for (int i = 1; i < MAX_FONT_COUNT; ++i) {
+        for (int i = 1; i < font_count; ++i) {
             offsets_y[i] = offsets_y[0];
         }
     }
@@ -1514,7 +1515,7 @@ cleanup (void)
     free(output_names);
 
     free(area_stack.ptr);
-    for (int i = 0; font_list[i]; i++) {
+    for (int i = 0; i < font_count; i++) {
         if (font_list[i]->xft_ft) {
             XftFontClose (dpy, font_list[i]->xft_ft);
         }
@@ -1525,6 +1526,7 @@ cleanup (void)
         free(font_list[i]);
     }
     free(font_list);
+    free(offsets_y);
 
     while (monhead) {
         monitor_t *next = monhead->next;
@@ -1581,7 +1583,7 @@ main (int argc, char **argv)
     xcb_expose_event_t *expose_ev;
     xcb_button_press_event_t *press_ev;
     char input[4096] = {0, };
-    size_t input_offset = 0;
+//    size_t input_offset = 0;
     bool permanent = false;
     int geom_v[4] = { -1, -1, 0, 0 };
     int ch;
